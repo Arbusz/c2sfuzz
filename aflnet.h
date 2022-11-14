@@ -32,7 +32,7 @@ typedef struct {
   u32 seeds_count;            /* total number of seeds, it must be equal the size of the seeds array */
   u32 depth;                  /* distance from the current state to the entry state */
   u8* trace_mini; 
-  u32 paths_covered;          /* total number of covered paths when visiting this state */
+  u32 bits_covered;          /* total number of covered paths when visiting this state */
 } state_info_t;
 
 enum {
