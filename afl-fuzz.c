@@ -70,7 +70,7 @@
 #include "aflnet.h"
 #include <graphviz/gvc.h>
 #include <math.h>
-
+#define min(a,b) ((a) < (b) ? (a) : (b))
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
 #endif /* __APPLE__ || __FreeBSD__ || __OpenBSD__ */
