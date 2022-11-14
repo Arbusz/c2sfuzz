@@ -787,7 +787,7 @@ u32 count_minibits(u8* bitmap)
   {
     for(int j=0; j<8; j++)
     {
-      if ((bit8[i]&a[j]))
+      if ((bitmap[i]&a[j]))
           total++;
     }
   }
