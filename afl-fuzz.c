@@ -770,7 +770,7 @@ static void merge_minimize_bits(u8* dst, u8* tag) {
 
   while (i < MAP_SIZE) {
 
-    dst[i >> 3] = (dst[i >> 3] & 1 << (i & 7) | tag[i >> 3] & 1 << (i & 7));
+    dst[i >> 3] = ((dst[i >> 3] & 1 << (i & 7))| (tag[i >> 3] & 1 << (i & 7)));
     i++;
 
   }
