@@ -2457,19 +2457,21 @@ static void update_bitmap_score(struct queue_entry* q, u8 dry_run) {
 
 static void no_update_bitmap_score(struct queue_entry* q, u8 dry_run) {
 
-  u32 i;
+ 
 
   /* For every byte set in trace_bits[], see if there is a previous winner,
      and how it compares to us. */
+  if (state_aware_mode) 
+    if (!q->trace_mini) {
+      q->trace_mini = ck_alloc(MAP_SIZE >> 3);
+      minimize_bits(q->trace_mini, trace_bits);
+      update_state_aware_variables(q, dry_run);
+      ck_free(q->trace_mini);
+      q->trace_mini = 0;
+    }
+  
 
-  if (!q->trace_mini) {
-    q->trace_mini = ck_alloc(MAP_SIZE >> 3);
-    minimize_bits(q->trace_mini, trace_bits);
-  }
-  if (state_aware_mode) update_state_aware_variables(q, dry_run);
-
-  ck_free(q->trace_mini);
-  q->trace_mini = 0;
+  
 
 }
 
