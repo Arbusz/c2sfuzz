@@ -2457,8 +2457,6 @@ static void update_bitmap_score(struct queue_entry* q, u8 dry_run) {
 
 static void no_update_bitmap_score(struct queue_entry* q, u8 dry_run) {
 
- 
-
   /* For every byte set in trace_bits[], see if there is a previous winner,
      and how it compares to us. */
   if (state_aware_mode) 
@@ -2468,10 +2466,9 @@ static void no_update_bitmap_score(struct queue_entry* q, u8 dry_run) {
       update_state_aware_variables(q, dry_run);
       ck_free(q->trace_mini);
       q->trace_mini = 0;
+    } else {
+      update_state_aware_variables(q, dry_run);
     }
-  
-
-  
 
 }
 
@@ -3807,6 +3804,9 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
 
   start_us = get_cur_time_us();
 
+  int st = 0;
+
+
   for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
 
     u32 cksum;
@@ -3879,6 +3879,8 @@ static u8 calibrate_case(char** argv, struct queue_entry* q, u8* use_mem,
   total_bitmap_entries++;
 
   update_bitmap_score(q, dry_run);
+  st = 1;
+
 
   /* If this case didn't result in new output from the instrumentation, tell
      parent. This is a non-critical problem, but something to warn the user
@@ -3905,8 +3907,9 @@ abort_calibration:
     }
 
   }
-
-  no_update_bitmap_score(q, dry_run);
+  
+  if(st==0)
+    no_update_bitmap_score(q, dry_run);
 
   stage_name = old_sn;
   stage_cur  = old_sc;
