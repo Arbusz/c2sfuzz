@@ -6380,6 +6380,8 @@ AFLNET_REGIONS_SELECTION:;
     it = kl_next(M2_prev);
   }
 
+  if(UR(10) < 5) {
+
   u32 in_buf_size = 0;
   while (it != M2_next) {
     in_buf = (u8 *) ck_realloc (in_buf, in_buf_size + kl_val(it)->msize);
@@ -7915,6 +7917,598 @@ havoc_stage:
     stage_finds[STAGE_SPLICE]  += new_hit_cnt - orig_hit_cnt;
     stage_cycles[STAGE_SPLICE] += stage_max;
   }
+
+  } else {
+  
+  u32 in_buf_size = 0;
+  u32 mutat_start = 0;
+  u32 mutat_len = 0;
+  while (it != M2_next) {
+    in_buf = (u8 *) ck_realloc (in_buf, in_buf_size + kl_val(it)->msize); 
+    if (!in_buf) PFATAL("AFLNet cannot allocate memory for in_buf");
+    //Retrieve data from kl_messages to populate the in_buf
+    memcpy(&in_buf[in_buf_size], kl_val(it)->mdata, kl_val(it)->msize);
+    mutat_start = in_buf_size;
+    in_buf_size += kl_val(it)->msize;
+    mutat_len = kl_val(it)->msize;
+    it = kl_next(it);
+  }
+
+  orig_in = in_buf;
+
+  out_buf = ck_alloc_nozero(in_buf_size);
+  memcpy(out_buf, in_buf, in_buf_size);
+
+  //Update len to keep the correct size of the buffer being mutated
+  len = in_buf_size;
+
+  //Save the len for later use
+  M2_len = len;
+
+  /*********************
+   * PERFORMANCE SCORE *
+   *********************/
+
+  orig_perf = perf_score = calculate_score(queue_cur);
+
+  // /* Skip right away if -d is given, if we have done deterministic fuzzing on
+  //    this entry ourselves (was_fuzzed), or if it has gone through deterministic
+  //    testing in earlier, resumed runs (passed_det). */
+
+  // if (skip_deterministic || queue_cur->was_fuzzed || queue_cur->passed_det)
+  //   goto havoc_stage;
+
+  // /* Skip deterministic fuzzing if exec path checksum puts this out of scope
+  //    for this master instance. */
+
+  // if (master_max && (queue_cur->exec_cksum % master_max) != master_id - 1)
+  //   goto havoc_stage;
+
+  // doing_det = 1;
+
+
+
+  /****************
+   * RANDOM HAVOC *
+   ****************/
+
+havoc_stage:
+
+  stage_cur_byte = -1;
+
+  /* The havoc stage mutation code is also invoked when splicing files; if the
+     splice_cycle variable is set, generate different descriptions and such. */
+
+  if (!splice_cycle) {
+
+    stage_name  = "havoc";
+    stage_short = "havoc";
+    stage_max   = (doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
+                  perf_score / havoc_div / 100;
+
+  } else {
+
+    static u8 tmp[32];
+
+    perf_score = orig_perf;
+
+    sprintf(tmp, "splice %u", splice_cycle);
+    stage_name  = tmp;
+    stage_short = "splice";
+    stage_max   = SPLICE_HAVOC * perf_score / havoc_div / 100;
+
+  }
+
+  if (stage_max < HAVOC_MIN) stage_max = HAVOC_MIN;
+
+  // temp_len = len;
+  temp_len = mutat_len;
+
+  orig_hit_cnt = queued_paths + unique_crashes;
+
+  havoc_queued = queued_paths;
+
+  /* We essentially just do several thousand runs (depending on perf_score)
+     where we take the input file and make random stacked tweaks. */
+
+  for (stage_cur = 0; stage_cur < stage_max; stage_cur++) {
+
+    u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2));
+
+    stage_cur_val = use_stacking;
+
+    for (i = 0; i < use_stacking; i++) {
+
+      switch (UR(15 + 2 + (region_level_mutation ? 0 : 0))) { //do not mutate region
+
+        case 0:
+
+          /* Flip a single bit somewhere. Spooky! */
+
+          FLIP_BIT(&out_buf[mutat_start], UR(temp_len << 3));
+          break;
+
+        case 1:
+
+          /* Set byte to interesting value. */
+
+          out_buf[len-mutat_len+UR(temp_len)] = interesting_8[UR(sizeof(interesting_8))];
+          break;
+
+        case 2:
+
+          /* Set word to interesting value, randomly choosing endian. */
+
+          if (temp_len < 2) break;
+
+          if (UR(2)) {
+
+            *(u16*)(out_buf + len-mutat_len + UR(temp_len - 1)) =
+              interesting_16[UR(sizeof(interesting_16) >> 1)];
+
+          } else {
+
+            *(u16*)(out_buf + len-mutat_len + UR(temp_len - 1)) = SWAP16(
+              interesting_16[UR(sizeof(interesting_16) >> 1)]);
+
+          }
+
+          break;
+
+        case 3:
+
+          /* Set dword to interesting value, randomly choosing endian. */
+
+          if (temp_len < 4) break;
+
+          if (UR(2)) {
+
+            *(u32*)(out_buf + len-mutat_len + UR(temp_len - 3)) =
+              interesting_32[UR(sizeof(interesting_32) >> 2)];
+
+          } else {
+
+            *(u32*)(out_buf + len-mutat_len + UR(temp_len - 3)) = SWAP32(
+              interesting_32[UR(sizeof(interesting_32) >> 2)]);
+
+          }
+
+          break;
+
+        case 4:
+
+          /* Randomly subtract from byte. */
+
+          out_buf[len-mutat_len+UR(temp_len)] -= 1 + UR(ARITH_MAX);
+          break;
+
+        case 5:
+
+          /* Randomly add to byte. */
+
+          out_buf[len-mutat_len+UR(temp_len)] += 1 + UR(ARITH_MAX);
+          break;
+
+        case 6:
+
+          /* Randomly subtract from word, random endian. */
+
+          if (temp_len < 2) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(temp_len - 1);
+
+            *(u16*)(out_buf + len-mutat_len + pos) -= 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(temp_len - 1);
+            u16 num = 1 + UR(ARITH_MAX);
+
+            *(u16*)(out_buf + len-mutat_len + pos) =
+              SWAP16(SWAP16(*(u16*)(out_buf + len-mutat_len + pos)) - num);
+
+          }
+
+          break;
+
+        case 7:
+
+          /* Randomly add to word, random endian. */
+
+          if (temp_len < 2) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(temp_len - 1);
+
+            *(u16*)(out_buf+ len-mutat_len + pos) += 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(temp_len - 1);
+            u16 num = 1 + UR(ARITH_MAX);
+
+            *(u16*)(out_buf+len-mutat_len + pos) =
+              SWAP16(SWAP16(*(u16*)(out_buf +len-mutat_len + pos)) + num);
+
+          }
+
+          break;
+
+        case 8:
+
+          /* Randomly subtract from dword, random endian. */
+
+          if (temp_len < 4) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(temp_len - 3);
+
+            *(u32*)(out_buf +len-mutat_len + pos) -= 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(temp_len - 3);
+            u32 num = 1 + UR(ARITH_MAX);
+
+            *(u32*)(out_buf + len-mutat_len + pos) =
+              SWAP32(SWAP32(*(u32*)(out_buf + len-mutat_len + pos)) - num);
+
+          }
+
+          break;
+
+        case 9:
+
+          /* Randomly add to dword, random endian. */
+
+          if (temp_len < 4) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(temp_len - 3);
+
+            *(u32*)(out_buf + len-mutat_len + pos) += 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(temp_len - 3);
+            u32 num = 1 + UR(ARITH_MAX);
+
+            *(u32*)(out_buf + len-mutat_len + pos) =
+              SWAP32(SWAP32(*(u32*)(out_buf + len-mutat_len + pos)) + num);
+
+          }
+
+          break;
+
+        case 10:
+
+          /* Just set a random byte to a random value. Because,
+             why not. We use XOR with 1-255 to eliminate the
+             possibility of a no-op. */
+
+          out_buf[len-mutat_len+UR(temp_len)] ^= 1 + UR(255);
+          break;
+
+        case 11 ... 12: {
+
+            /* Delete bytes. We're making this a bit more likely
+               than insertion (the next option) in hopes of keeping
+               files reasonably small. */
+
+            u32 del_from, del_len;
+
+            if (temp_len < 2) break;
+
+            /* Don't delete too much. */
+
+            del_len = choose_block_len(temp_len - 1);
+
+            del_from = UR(temp_len - del_len + 1);
+
+            memmove(out_buf+ len-mutat_len + del_from, out_buf + len-mutat_len + del_from + del_len,
+                    temp_len - del_from - del_len);
+
+            temp_len -= del_len;
+
+            break;
+
+          }
+
+        case 13:
+
+          if (temp_len + HAVOC_BLK_XL < MAX_FILE) {
+
+            /* Clone bytes (75%) or insert a block of constant bytes (25%). */
+
+            u8  actually_clone = UR(4);
+            u32 clone_from, clone_to, clone_len;
+            u8* new_buf;
+
+            if (actually_clone) {
+
+              clone_len  = choose_block_len(temp_len);
+              clone_from = UR(temp_len - clone_len + 1);
+
+            } else {
+
+              clone_len = choose_block_len(HAVOC_BLK_XL);
+              clone_from = 0;
+
+            }
+
+            clone_to   = len-mutat_len+UR(temp_len);
+
+            new_buf = ck_alloc_nozero(len-mutat_len+temp_len + clone_len);
+
+            /* Head */
+
+            memcpy(new_buf, out_buf, clone_to);
+
+            /* Inserted part */
+
+            if (actually_clone)
+              memcpy(new_buf + clone_to, out_buf +len-mutat_len+ clone_from, clone_len);
+            else
+              memset(new_buf + clone_to,
+                     UR(2) ? UR(256) : out_buf[len-mutat_len+UR(temp_len)], clone_len);
+
+            /* Tail */
+            memcpy(new_buf + clone_to + clone_len, out_buf + clone_to,
+                   len-mutat_len+temp_len - clone_to);
+
+            ck_free(out_buf);
+            out_buf = new_buf;
+            temp_len += clone_len;
+
+          }
+
+          break;
+
+        case 14: {
+
+            /* Overwrite bytes with a randomly selected chunk (75%) or fixed
+               bytes (25%). */
+
+            u32 copy_from, copy_to, copy_len;
+
+            if (temp_len < 2) break;
+
+            copy_len  = choose_block_len(temp_len - 1);
+
+            copy_from = len-mutat_len+UR(temp_len - copy_len + 1);
+            copy_to   = len-mutat_len+UR(temp_len - copy_len + 1);
+
+            if (UR(4)) {
+
+              if (copy_from != copy_to)
+                memmove(out_buf + copy_to, out_buf + copy_from, copy_len);
+
+            } else memset(out_buf + copy_to,
+                          UR(2) ? UR(256) : out_buf[len-mutat_len+UR(temp_len)], copy_len);
+
+            break;
+
+          }
+
+        /* Values 15 and 16 can be selected only if there are any extras
+           present in the dictionaries. */
+
+        case 15: {
+            if (extras_cnt + a_extras_cnt == 0) break;
+
+            /* Overwrite bytes with an extra. */
+
+            if (!extras_cnt || (a_extras_cnt && UR(2))) {
+
+              /* No user-specified extras or odds in our favor. Let's use an
+                 auto-detected one. */
+
+              u32 use_extra = UR(a_extras_cnt);
+              u32 extra_len = a_extras[use_extra].len;
+              u32 insert_at;
+
+              if (extra_len > temp_len) break;
+
+              insert_at = len-mutat_len+UR(temp_len - extra_len + 1);
+              memcpy(out_buf + insert_at, a_extras[use_extra].data, extra_len);
+
+            } else {
+
+              /* No auto extras or odds in our favor. Use the dictionary. */
+
+              u32 use_extra = UR(extras_cnt);
+              u32 extra_len = extras[use_extra].len;
+              u32 insert_at;
+
+              if (extra_len > temp_len) break;
+
+              insert_at = len-mutat_len+UR(temp_len - extra_len + 1);
+              memcpy(out_buf + insert_at, extras[use_extra].data, extra_len);
+
+            }
+
+            break;
+
+          }
+
+        case 16: {
+            if (extras_cnt + a_extras_cnt == 0) break;
+
+            u32 use_extra, extra_len, insert_at = len-mutat_len+UR(temp_len + 1);
+            u8* new_buf;
+
+            /* Insert an extra. Do the same dice-rolling stuff as for the
+               previous case. */
+
+            if (!extras_cnt || (a_extras_cnt && UR(2))) {
+
+              use_extra = UR(a_extras_cnt);
+              extra_len = a_extras[use_extra].len;
+
+              if (len-mutat_len+temp_len + extra_len >= MAX_FILE) break;
+
+              new_buf = ck_alloc_nozero(len-mutat_len+temp_len + extra_len);
+
+              /* Head */
+              memcpy(new_buf, out_buf, insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, a_extras[use_extra].data, extra_len);
+
+            } else {
+
+              use_extra = UR(extras_cnt);
+              extra_len = extras[use_extra].len;
+
+              if (len-mutat_len+temp_len + extra_len >= MAX_FILE) break;
+
+              new_buf = ck_alloc_nozero(len-mutat_len+temp_len + extra_len);
+
+              /* Head */
+              memcpy(new_buf, out_buf, insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, extras[use_extra].data, extra_len);
+
+            }
+
+            /* Tail */
+            memcpy(new_buf + insert_at + extra_len, out_buf + insert_at,
+                   len-mutat_len+temp_len - insert_at);
+
+            ck_free(out_buf);
+            out_buf   = new_buf;
+            temp_len += extra_len;
+
+            break;
+
+          }
+        /* Values 17 to 20 can be selected only if region-level mutations are enabled */
+
+        /* Replace the current region with a random region from a random seed */
+        case 17: {
+            u32 src_region_len = 0;
+            u8* new_buf = choose_source_region(&src_region_len);
+            if (new_buf == NULL) break;
+
+            //replace the current region
+            ck_free(out_buf);
+            out_buf = new_buf;
+            temp_len = src_region_len;
+            break;
+          }
+
+        /* Insert a random region from a random seed to the beginning of the current region */
+        case 18: {
+            u32 src_region_len = 0;
+            u8* src_region = choose_source_region(&src_region_len);
+            if (src_region == NULL) break;
+
+            if (temp_len + src_region_len >= MAX_FILE) {
+              ck_free(src_region);
+              break;
+            }
+
+            u8* new_buf = ck_alloc_nozero(temp_len + src_region_len);
+
+            memcpy(new_buf, src_region, src_region_len);
+
+            memcpy(&new_buf[src_region_len], out_buf, temp_len);
+
+            ck_free(out_buf);
+            ck_free(src_region);
+            out_buf = new_buf;
+            temp_len += src_region_len;
+            break;
+          }
+
+        /* Insert a random region from a random seed to the end of the current region */
+        case 19: {
+            u32 src_region_len = 0;
+            u8* src_region = choose_source_region(&src_region_len);
+            if (src_region == NULL) break;
+
+            if (temp_len + src_region_len >= MAX_FILE) {
+              ck_free(src_region);
+              break;
+            }
+
+            u8* new_buf = ck_alloc_nozero(temp_len + src_region_len);
+
+            memcpy(new_buf, out_buf, temp_len);
+
+            memcpy(&new_buf[temp_len], src_region, src_region_len);
+
+            ck_free(out_buf);
+            ck_free(src_region);
+            out_buf = new_buf;
+            temp_len += src_region_len;
+            break;
+          }
+
+        /* Duplicate the current region */
+        case 20: {
+            if (temp_len * 2 >= MAX_FILE) break;
+
+            u8* new_buf = ck_alloc_nozero(temp_len * 2);
+
+            memcpy(new_buf, out_buf, temp_len);
+
+            memcpy(&new_buf[temp_len], out_buf, temp_len);
+
+            ck_free(out_buf);
+            out_buf = new_buf;
+            temp_len += temp_len;
+            break;
+          }
+
+      }
+
+    }
+
+    if (common_fuzz_stuff(argv, out_buf, temp_len))
+      goto abandon_entry;
+
+    /* out_buf might have been mangled a bit, so let's restore it to its
+       original size and shape. */
+
+    if (temp_len < len) out_buf = ck_realloc(out_buf, len);
+    temp_len = len;
+    memcpy(out_buf, in_buf, len);
+
+    /* If we're finding new stuff, let's run for a bit longer, limits
+       permitting. */
+
+    if (queued_paths != havoc_queued) {
+
+      if (perf_score <= HAVOC_MAX_MULT * 100) {
+        stage_max  *= 2;
+        perf_score *= 2;
+      }
+
+      havoc_queued = queued_paths;
+
+    }
+
+  }
+
+  new_hit_cnt = queued_paths + unique_crashes;
+
+  if (!splice_cycle) {
+    stage_finds[STAGE_HAVOC]  += new_hit_cnt - orig_hit_cnt;
+    stage_cycles[STAGE_HAVOC] += stage_max;
+  } else {
+    stage_finds[STAGE_SPLICE]  += new_hit_cnt - orig_hit_cnt;
+    stage_cycles[STAGE_SPLICE] += stage_max;
+  }
+  } 
+
+
 
 #ifndef IGNORE_FINDS
 
