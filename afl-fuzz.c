@@ -7972,7 +7972,6 @@ havoc_stage:
    * RANDOM HAVOC *
    ****************/
 
-havoc_stage:
 
   stage_cur_byte = -1;
 
