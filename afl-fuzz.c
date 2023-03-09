@@ -6380,7 +6380,7 @@ AFLNET_REGIONS_SELECTION:;
     it = kl_next(M2_prev);
   }
 
-  if(UR(10) < 3) {
+  if(UR(100) < 80) {
 
   u32 in_buf_size = 0;
   while (it != M2_next) {
